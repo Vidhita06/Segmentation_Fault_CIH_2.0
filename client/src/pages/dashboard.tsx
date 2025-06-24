@@ -9,12 +9,17 @@ import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { EmergencyContactForm } from "@/components/EmergencyContactForm";
+import { useEmergencyContacts } from "@/hooks/use-emergency-contacts";
 
 export default function Dashboard() {
   const userId = getCurrentUserId();
   const [, setLocation] = useLocation();
   const [greeting, setGreeting] = useState("");
   const { toast } = useToast();
+  
+  // Emergency contacts hook
+  const { showForm, handleSuccess } = useEmergencyContacts(userId);
 
   const { data: user } = useQuery<UserType>({
     queryKey: [`/api/users`, userId],
@@ -354,6 +359,13 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
+      
+      {/* Emergency Contact Form Modal */}
+      <EmergencyContactForm
+        userId={userId}
+        isOpen={showForm}
+        onSuccess={handleSuccess}
+      />
     </div>
   );
 }

@@ -16,6 +16,36 @@ import multer from "multer";
 
 const SALT_ROUNDS = 10;
 
+// Email service function (simulated for now)
+async function sendEmergencyContactNotifications(emails: string[], user: any, subject: string | null = null, html: string | null = null) {
+  const currentTime = new Date().toLocaleString();
+  const platformName = "WellnessBuddy";
+  
+  for (const email of emails) {
+    try {
+      console.log(`📧 Sending health alert to: ${email}`);
+      console.log(`Subject: ${subject || `Update from ${platformName}: ${user.firstName} ${user.lastName} has logged in`}`);
+      console.log(`Body: ${html || `Dear Family Member,\n\nThis is an automated message from ${platformName} to let you know that ${user.firstName} ${user.lastName} has just logged into our platform.\n\nLogin Time: ${currentTime}\n\nThis notification is part of our commitment to user safety, as requested by ${user.firstName}.\n\nThank you,\nThe ${platformName} Team`}`);
+      
+      // In a real implementation, you would use a service like SendGrid, Mailgun, or AWS SES
+      // Example with SendGrid:
+      // const sgMail = require('@sendgrid/mail');
+      // sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+      // await sgMail.send({
+      //   to: email,
+      //   from: 'noreply@wellnessbuddy.com',
+      //   subject: `Update from ${platformName}: ${user.firstName} ${user.lastName} has logged in`,
+      //   html: `<p>Dear Family Member,</p><p>This is an automated message from ${platformName} to let you know that ${user.firstName} ${user.lastName} has just logged into our platform.</p><p><strong>Login Time:</strong> ${currentTime}</p><p>This notification is part of our commitment to user safety, as requested by ${user.firstName}.</p><p>Thank you,<br>The ${platformName} Team</p>`
+      // });
+      
+      // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } catch (error) {
+      console.error(`Failed to send email to ${email}:`, error);
+    }
+  }
+}
+
 const smsSettingsSchema = z.object({
   phone: z.string().optional(),
   smsOptIn: z.boolean().optional(),
@@ -23,6 +53,26 @@ const smsSettingsSchema = z.object({
 
 // Multer setup for file uploads
 const upload = multer({ dest: 'uploads/' });
+
+// Utility to check for abnormal health report
+function isAbnormal(report: any) {
+  if (report.bloodPressure) {
+    const [sys, dia] = report.bloodPressure.split('/').map(Number);
+    if (sys > 140 || dia > 90) return true;
+  }
+  // Add more checks as needed
+  return false;
+}
+
+// Utility to notify emergency contacts
+async function notifyEmergencyContacts(userId: number, subject: string, htmlMessage: string) {
+  const contacts = await storage.getEmergencyContactsByUserId(userId);
+  const user = await storage.getUser(userId);
+  if (!user) return;
+  for (const contact of contacts) {
+    await sendEmergencyContactNotifications([contact.email], user, subject, htmlMessage);
+  }
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Authentication routes
@@ -314,6 +364,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Rename the file to keep its original name + extension
       fs.renameSync(req.file.path, path.join(req.file.destination, req.file.originalname));
 
+      // Notify emergency contacts if abnormal
+      if (isAbnormal(parsedData)) {
+        const user = await storage.getUser(parsedData.userId);
+        await notifyEmergencyContacts(
+          parsedData.userId,
+          'Health Alert from WellnessBuddy',
+          `<p>Dear Family Member,<br>
+          This is an automated alert from WellnessBuddy.<br>
+          <b>${user.firstName} ${user.lastName}</b> has uploaded a health report with abnormal values.<br>
+          <b>Blood Pressure:</b> ${parsedData.bloodPressure}<br>
+          <b>Time:</b> ${new Date().toLocaleString()}<br>
+          Please check in with them if needed.<br>
+          <br>Thank you,<br>The WellnessBuddy Team</p>`
+        );
+      }
+
       res.status(201).json(report);
     } catch (error) {
       // If something goes wrong, delete the uploaded file
@@ -350,34 +416,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.delete("/api/reports/:reportId", async (req, res) => {
+  app.delete("/api/reports/:id", async (req, res) => {
     try {
-      const reportId = parseInt(req.params.reportId);
-      // TODO: Add proper authorization to ensure user owns this report
-      const report = await storage.getHealthReportById(reportId);
-
-      if (!report) {
-        return res.status(404).json({ message: "Report not found" });
-      }
-
-      // 1. Delete the file from the filesystem
-      const filePath = path.join(process.cwd(), 'uploads', report.fileName);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-
-      // 2. Delete the record from the database
-      const deleted = await storage.deleteHealthReport(reportId);
-
-      if (!deleted) {
-        // This case is unlikely if the above check passed, but good practice
-        return res.status(404).json({ message: "Report not found in DB" });
-      }
-
-      res.status(200).json({ message: "Report deleted successfully" });
+      const { id } = req.params;
+      await storage.deleteReport(parseInt(id, 10));
+      res.status(204).send();
     } catch (error) {
-      console.error("Delete report error:", error);
-      res.status(500).json({ message: "Internal server error" });
+      console.error("Failed to delete report:", error);
+      res.status(500).json({ message: "Failed to delete the report." });
     }
   });
 
@@ -419,6 +465,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(204).send();
     } catch (error) {
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Emergency contacts routes
+  app.get("/api/user/emergency-contacts", async (req, res) => {
+    try {
+      const userId = parseInt(req.query.userId as string);
+      if (!userId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+      const contacts = await storage.getEmergencyContactsByUserId(userId);
+      res.json({ contacts });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch emergency contacts" });
+    }
+  });
+
+  app.post("/api/user/emergency-contacts", async (req, res) => {
+    try {
+      const { emails, userId } = req.body;
+      
+      // Validate input
+      if (!emails || !Array.isArray(emails) || emails.length === 0) {
+        return res.status(400).json({ message: "At least one email address is required" });
+      }
+      if (!userId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+      // Uniqueness check
+      if (new Set(emails).size !== emails.length) {
+        return res.status(400).json({ message: "Emails must be unique." });
+      }
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      for (const email of emails) {
+        if (!emailRegex.test(email)) {
+          return res.status(400).json({ message: `Invalid email format: ${email}` });
+        }
+      }
+      // Get user information for email notification
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      // Clear existing emergency contacts and add new ones
+      await storage.deleteEmergencyContactsByUserId(userId);
+      for (const email of emails) {
+        await storage.createEmergencyContact({
+          userId,
+          email,
+          name: `Family Member`,
+          relationship: 'Family',
+        });
+      }
+      // Update user to mark that emergency contacts have been added
+      await storage.updateUser(userId, { hasAddedEmergencyContacts: true });
+      // Send email notifications (simulated for now)
+      try {
+        await sendEmergencyContactNotifications(emails, user);
+      } catch (emailError) {
+        console.error('Failed to send email notifications:', emailError);
+      }
+      res.json({ 
+        message: "Emergency contacts saved successfully",
+        contactsCount: emails.length 
+      });
+    } catch (error) {
+      console.error("Emergency contacts error:", error);
+      res.status(500).json({ message: "Failed to save emergency contacts" });
+    }
+  });
+
+  app.patch("/api/user/emergency-contacts", async (req, res) => {
+    try {
+      const { emails, userId } = req.body;
+      if (!userId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+      if (!emails || !Array.isArray(emails) || emails.length === 0) {
+        return res.status(400).json({ message: "At least one email address is required" });
+      }
+      // Uniqueness check
+      if (new Set(emails).size !== emails.length) {
+        return res.status(400).json({ message: "Emails must be unique." });
+      }
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      for (const email of emails) {
+        if (!emailRegex.test(email)) {
+          return res.status(400).json({ message: `Invalid email format: ${email}` });
+        }
+      }
+      // Remove old contacts and add new ones
+      await storage.deleteEmergencyContactsByUserId(userId);
+      for (const email of emails) {
+        await storage.createEmergencyContact({
+          userId,
+          email,
+          name: `Family Member`,
+          relationship: 'Family',
+        });
+      }
+      // Update user to mark that emergency contacts have been added
+      await storage.updateUser(userId, { hasAddedEmergencyContacts: true });
+      res.json({ message: "Emergency contacts updated successfully" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update emergency contacts" });
     }
   });
 
@@ -474,6 +627,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, message: "Premium upgrade successful" });
     } catch (error) {
       res.status(500).json({ message: "Payment processing failed" });
+    }
+  });
+
+  // Send a health report to emergency contacts
+  app.post('/api/health-reports/:reportId/send-to-contacts', async (req, res) => {
+    try {
+      const reportId = parseInt(req.params.reportId);
+      const report = await storage.getHealthReportById(reportId);
+      if (!report) return res.status(404).json({ message: 'Report not found' });
+
+      const user = await storage.getUser(report.userId);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+
+      const contacts = await storage.getEmergencyContactsByUserId(report.userId);
+
+      const subject = `Health Report from ${user.firstName} ${user.lastName}`;
+      const downloadLink = `http://localhost:5000/api/reports/${reportId}/view`;
+      const html = `
+        <p>Dear Family Member,<br>
+        ${user.firstName} ${user.lastName} has shared a health report with you.<br>
+        <b>Report:</b> ${report.fileName}<br>
+        <b>Download:</b> <a href="${downloadLink}">${downloadLink}</a><br>
+        <b>Time:</b> ${new Date().toLocaleString()}<br>
+        <br>Thank you,<br>The WellnessBuddy Team</p>
+      `;
+
+      for (const contact of contacts) {
+        await sendEmergencyContactNotifications([contact.email], user, subject, html);
+      }
+
+      res.json({ message: 'Report sent to emergency contacts.' });
+    } catch (error) {
+      res.status(500).json({ message: 'Failed to send report to contacts.' });
     }
   });
 

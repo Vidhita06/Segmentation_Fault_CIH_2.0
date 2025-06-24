@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -169,6 +169,27 @@ export default function SettingsPage() {
       description: `${theme === "light" ? "Dark" : "Light"} mode enabled`,
     });
   };
+
+  // Emergency Contacts State
+  const [contacts, setContacts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch contacts on mount
+  useEffect(() => {
+    async function fetchContacts() {
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/user/emergency-contacts?userId=${userId}`);
+        const data = await res.json();
+        setContacts(data.contacts || []);
+      } catch {
+        toast({ title: 'Error', description: 'Failed to load emergency contacts', variant: 'destructive' });
+      } finally {
+        setLoading(false);
+      }
+    }
+    if (userId) fetchContacts();
+  }, [userId]);
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
@@ -406,6 +427,31 @@ export default function SettingsPage() {
                     </div>
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Emergency Contacts */}
+            <Card className="mb-8">
+              <CardHeader>
+                <CardTitle>Emergency Contacts</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div>Loading...</div>
+                ) : (
+                  <form className="space-y-4">
+                    {contacts.map((contact, i) => (
+                      <div key={i} className="space-y-1">
+                        <label className="block font-medium">Family Member {i + 1} Email</label>
+                        <Input
+                          type="email"
+                          value={contact?.email || ''}
+                          disabled
+                        />
+                      </div>
+                    ))}
+                  </form>
+                )}
               </CardContent>
             </Card>
           </div>

@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { HealthReport } from "@shared/schema";
 
-const genAI = new GoogleGenerativeAI({ apiKey: process.env.GEMINI_API_KEY! });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export interface HealthAnalysis {
   overallScore: number;
@@ -200,24 +200,35 @@ function generateFallbackAnalysis(reports: HealthReport[]): HealthAnalysis {
 }
 
 export async function getChatResponse(message: string, userId: number): Promise<string> {
+  const n8nWebhookUrl = "https://vidhita.app.n8n.cloud/workflow/kROiV3jUwCdy97iC";
+
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const response = await fetch(n8nWebhookUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text: message, userId }),
+    });
 
-    const chat = await model.generateContent([
-      {
-        role: "user",
-        parts: [{
-          text: `User ID: ${userId}\nYou are DocBot, an elderly health assistant. Message: "${message}".\nProvide a helpful, supportive response with clear advice.`
-        }]
-      }
-    ]);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("n8n webhook returned an error:", {
+        status: response.status,
+        body: errorText,
+      });
+      return "I'm sorry, I couldn't get a response from the bot.";
+    }
 
-    const response = await chat.response;
-    const reply = await response.text();
-    return reply || "I'm here to help, but something went wrong. Please try again.";
+    const data = await response.json();
+
+    const reply = data.reply || data.text || data.message || data.output;
+    
+    return reply || "I received a response, but it was not in the expected format.";
+
   } catch (error) {
-    console.error("Gemini chat error:", error);
-    return "I'm experiencing a glitch. Please try again later.";
+    console.error("Error connecting to n8n webhook:", error);
+    return "I'm sorry, but there was a technical error when trying to reach the bot.";
   }
 }
 

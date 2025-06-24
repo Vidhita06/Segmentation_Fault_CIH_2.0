@@ -15,7 +15,7 @@ export default function Landing() {
     { name: "Apeksha Sharma" },
     { name: "Vaishnavi Singh" },
     { name: "Gunjal Mandawkar" },
-    { name: "Vidhita Bias" },
+    { name: "Vidhita Bais" },
   ];
 
   return (

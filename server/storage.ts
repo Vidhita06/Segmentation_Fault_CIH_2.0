@@ -9,6 +9,8 @@ import {
   type InsertHealthReport,
   type Notification,
   type InsertNotification,
+  type EmergencyContact,
+  type InsertEmergencyContact,
 } from "@shared/schema";
 
 export interface IStorage {
@@ -36,16 +38,22 @@ export interface IStorage {
   createHealthReport(report: InsertHealthReport): Promise<HealthReport>;
   getHealthReportById(id: number): Promise<HealthReport | undefined>;
   deleteHealthReport(id: number): Promise<boolean>;
+  deleteReport(id: number): Promise<boolean>;
   
   // Notifications
   getNotificationsByUserId(userId: number): Promise<Notification[]>;
   createNotification(notification: InsertNotification): Promise<Notification>;
   markNotificationAsRead(id: number): Promise<boolean>;
   markAllNotificationsAsRead(userId: number): Promise<boolean>;
+  
+  // Emergency Contacts
+  getEmergencyContactsByUserId(userId: number): Promise<EmergencyContact[]>;
+  createEmergencyContact(contact: InsertEmergencyContact): Promise<EmergencyContact>;
+  deleteEmergencyContactsByUserId(userId: number): Promise<boolean>;
 }
 
 // Database Storage Implementation
-import { users, schedules, medicines, healthReports, notifications } from "@shared/schema";
+import { users, schedules, medicines, healthReports, notifications, emergencyContacts } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 
@@ -168,6 +176,11 @@ export class DatabaseStorage implements IStorage {
     return (result.rowCount ?? 0) > 0;
   }
 
+  async deleteReport(id: number): Promise<boolean> {
+    const result = await db.delete(healthReports).where(eq(healthReports.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
   async getNotificationsByUserId(userId: number): Promise<Notification[]> {
     return await db.select().from(notifications).where(eq(notifications.userId, userId));
   }
@@ -193,6 +206,23 @@ export class DatabaseStorage implements IStorage {
       .update(notifications)
       .set({ read: true })
       .where(eq(notifications.userId, userId));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getEmergencyContactsByUserId(userId: number): Promise<EmergencyContact[]> {
+    return await db.select().from(emergencyContacts).where(eq(emergencyContacts.userId, userId));
+  }
+
+  async createEmergencyContact(contact: InsertEmergencyContact): Promise<EmergencyContact> {
+    const [emergencyContact] = await db
+      .insert(emergencyContacts)
+      .values(contact)
+      .returning();
+    return emergencyContact;
+  }
+
+  async deleteEmergencyContactsByUserId(userId: number): Promise<boolean> {
+    const result = await db.delete(emergencyContacts).where(eq(emergencyContacts.userId, userId));
     return (result.rowCount ?? 0) > 0;
   }
 }

@@ -4,7 +4,7 @@ import { Header } from "@/components/layout/header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Upload, FileText, BarChart3, Brain, RefreshCw } from "lucide-react";
+import { Upload, FileText, BarChart3, Brain, RefreshCw, Mail } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
@@ -96,14 +96,22 @@ export default function ReportsPage() {
   });
 
   const analyzeReportMutation = useMutation({
-    mutationFn: async (fileName: string) => {
-      const prompt = `Please provide a brief, simulated health analysis for a report named "${fileName}". Include a summary, key findings, and two simple exercise recommendations appropriate for an elderly person.`;
-      const response = await apiRequest("POST", "/api/docbot/chat", { message: prompt, userId });
-      const data = await response.json();
-      return data.reply;
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("report", file);
+
+      const response = await fetch("/api/reports/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to analyze report");
+      }
+      return response.json();
     },
     onSuccess: (data) => {
-      setAnalysisResult(data);
+      setAnalysisResult(data.reply || JSON.stringify(data, null, 2));
       toast({
         title: "Analysis Complete",
         description: "DocBot has analyzed the report.",
@@ -139,7 +147,17 @@ export default function ReportsPage() {
 
   const handleAnalyze = () => {
     if (selectedFile) {
-      analyzeReportMutation.mutate(selectedFile.name);
+      analyzeReportMutation.mutate(selectedFile);
+    }
+  };
+
+  const handleSendToContacts = async (reportId: number) => {
+    try {
+      const res = await fetch(`/api/health-reports/${reportId}/send-to-contacts`, { method: 'POST' });
+      if (!res.ok) throw new Error();
+      toast({ title: 'Sent', description: 'Report sent to emergency contacts!', variant: 'default' });
+    } catch {
+      toast({ title: 'Error', description: 'Failed to send report to contacts.', variant: 'destructive' });
     }
   };
 
@@ -193,7 +211,7 @@ export default function ReportsPage() {
 
                   {selectedFile && (
                     <div className="flex space-x-2">
-                      <Button onClick={handleAnalyze} disabled={analyzeReportMutation.isPending} className="flex-1">
+                      <Button onClick={handleAnalyze} disabled={true} className="flex-1">
                         {analyzeReportMutation.isPending ? (
                           <>
                             <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
@@ -205,16 +223,16 @@ export default function ReportsPage() {
                             Analyze with DocBot
                           </>
                         )}
-                    </Button>
-                    <Button 
-                      onClick={handleUpload} 
-                      disabled={!selectedFile || uploadReportMutation.isPending}
-                      className="flex-1"
-                    >
-                        <Upload className="mr-2 h-4 w-4" />
-                      {uploadReportMutation.isPending ? "Uploading..." : "Upload"}
-                    </Button>
-                  </div>
+                      </Button>
+                      <Button 
+                        onClick={handleUpload} 
+                        disabled={!selectedFile || uploadReportMutation.isPending}
+                        className="flex-1"
+                      >
+                          <Upload className="mr-2 h-4 w-4" />
+                        {uploadReportMutation.isPending ? "Uploading..." : "Upload"}
+                      </Button>
+                    </div>
                   )}
 
                   {analysisResult && (
@@ -299,6 +317,15 @@ export default function ReportsPage() {
                           onClick={() => setReportToDelete(report)}
                         >
                           Delete
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleSendToContacts(report.id)}
+                          title="Send to Emergency Contacts"
+                        >
+                          <Mail className="h-4 w-4 mr-1" />
+                          Send to Contacts
                         </Button>
                       </div>
                     </div>
